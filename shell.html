@@ -1,7 +1,5 @@
 <form hx-post="/shell">
-  <div hx-swap="afterend">
-    <label>Command</label>
-    <input name="command" hx-post="/shell">
+  <div hx-target="this" hx-swap="outerHTML">
+    <textarea name="command" hx-post="/shell" rows="10" cols="50"></textarea>
   </div>
 </form>
-

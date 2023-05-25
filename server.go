@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os/exec"
+	"strings"
 )
 
 //go:embed index.html
@@ -27,16 +29,48 @@ func main() {
 			return
 		}
 
-		// The body is now in the `body` variable as a []byte.
-		// If you're expecting a string, you can convert it like this:
 		values, err := url.ParseQuery(string(body))
 		if err != nil {
 			http.Error(w, "Error parsing request body", http.StatusInternalServerError)
 			return
 		}
-        command := values.Get("command")
-		fmt.Fprintf(w, "Hello, there: %s", command)
+		command := values.Get("command")
+		fmt.Fprintf(w, "> <b>%s</b><br>", command)
+		parts := strings.Split(command, " ")
+		if len(parts) == 0 {
+			fmt.Fprintf(w, "Error: no command")
+			w.Write(shellForm)
+			return
+		}
+
+		log.Printf("Running command: %s", parts)
+
+		cmd := exec.Command(parts[0], parts[1:]...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("Error: %v, out: %s", err, out)
+			outputString := formatError(out)
+			fmt.Fprintf(w, "%s", outputString)
+		} else {
+			outputString := formatOutput(out)
+			fmt.Fprintf(w, "%s", outputString)
+		}
+
 		w.Write(shellForm)
 	})
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func formatOutput(out []byte) string {
+	return fmt.Sprintf(
+		"<div class=\"output\">%s</div>",
+		strings.Replace(string(out), "\n", "<br>", -1),
+	)
+}
+
+func formatError(out []byte) string {
+	return fmt.Sprintf(
+		"<div class=\"error\">%s</div>",
+		strings.Replace(string(out), "\n", "<br>", -1),
+	)
 }
