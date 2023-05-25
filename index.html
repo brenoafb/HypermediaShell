@@ -1,0 +1,9 @@
+<script src="https://unpkg.com/htmx.org@1.9.2"></script>
+<!-- have a button POST a click via AJAX -->
+<form hx-post="/shell">
+  <div hx-swap="afterend">
+    <label>Command</label>
+    <input name="command" hx-post="/shell">
+  </div>
+</form>
+
