@@ -1,5 +1,13 @@
 <script src="https://unpkg.com/htmx.org@1.9.2"></script>
 <style type="text/css">
+  body {
+    font-family: sans-serif;
+    background-color: #ffffea;
+  }
+  textarea {
+    font-family: sans-serif;
+    background-color: #ffffea;
+  }
   .output {
     color: green;
   }
@@ -8,9 +16,17 @@
   }
 </style>
 <!-- have a button POST a click via AJAX -->
-<form hx-post="/shell">
-  <div hx-target="this" hx-swap="outerHTML">
-    <textarea name="command" hx-post="/shell" rows="10" cols="50"></textarea>
+<form>
+  <div hx-target="this" hx-swap="afterend">
+    <textarea name="command" rows="5" cols="50"></textarea>
+    <button type="submit" hx-post="/shell">Submit</button>
   </div>
 </form>
-
+<!-- <form>
+  <div hx-target="this" hx-swap="outerHTML">
+    <textarea name="editor" rows="5" cols="50">Hello world</textarea>
+    <button type="submit" hx-post="/edit">Save</button>
+    <button type="submit" hx-post="/edit">Close</button>
+  </div>
+</form>
+ -->
