@@ -8,8 +8,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/user"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/websocket"
 )
@@ -37,23 +40,19 @@ func WSServer(ws *websocket.Conn) {
 		data := make(map[string]interface{})
 		err := websocket.JSON.Receive(ws, &data)
 		if err != nil {
-			fmt.Printf("Error: %v.\n", err)
-			break
+			errStr := fmt.Sprintf("%s", err.Error())
+			streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+			continue
 		}
 
 		fmt.Printf("Received: %v\n", data)
 
 		commandLine := data["command"].(string)
 
-		parts := strings.Split(commandLine, " ")
-		if len(parts) == 0 {
-			fmt.Fprintf(ws, "Error: no command")
-			return
-		}
-
 		if err != nil {
-			fmt.Printf("Error: %v.\n", err)
-			break
+			errStr := fmt.Sprintf("%s", err.Error())
+			streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+			continue
 		}
 
 		fmt.Printf("Received: %v\n", commandLine)
@@ -62,24 +61,20 @@ func WSServer(ws *websocket.Conn) {
 	}
 }
 
+func cd(dir string) error {
+	if dir == "" {
+		usr, err := user.Current()
+		if err != nil {
+			return err
+		}
+		dir = usr.HomeDir
+	}
+	return os.Chdir(dir)
+}
+
 func execCommand(ws *websocket.Conn, command string) {
 	if strings.HasPrefix(command, "clear") {
 		clear(ws)
-		return
-	}
-
-	cmd := exec.Command("/bin/sh", "-c", command)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr))
-		return
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr))
 		return
 	}
 
@@ -93,30 +88,66 @@ func execCommand(ws *websocket.Conn, command string) {
 	)
 	_, _ = ws.Write([]byte(header))
 
-	err = cmd.Start()
-	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr))
-		return
-	}
-
-	go streamHTMXOutput(ws, stdout)
-	go streamHTMXOutput(ws, stderr)
-
-	err = cmd.Wait()
-	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr))
-		return
-	}
-
-	footer := fmt.Sprintf(`
+	defer func() {
+		footer := fmt.Sprintf(`
 		<div id="notifications" hx-swap-oob="beforeend">
 		<hr>
 		</div>
 		`,
-	)
-	_, _ = ws.Write([]byte(footer))
+		)
+
+		_, _ = ws.Write([]byte(footer))
+	}()
+
+	if strings.HasPrefix(command, "cd") {
+		target := ""
+		parts := strings.Split(command, " ")
+		if len(parts) == 2 {
+			target = parts[1]
+		}
+		err := cd(target)
+		if err != nil {
+			errStr := fmt.Sprintf("%s", err.Error())
+			streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		}
+		return
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", command)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		return
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		return
+	}
+
+	err = cmd.Start()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		return
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+	go streamHTMXOutput(ws, stdout, &wg)
+	go streamHTMXOutput(ws, stderr, &wg)
+
+	err = cmd.Wait()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		return
+	}
+	wg.Wait()
 }
 
 func clear(ws *websocket.Conn) {
@@ -126,7 +157,7 @@ func clear(ws *websocket.Conn) {
 	_, _ = ws.Write([]byte(result))
 }
 
-func streamHTMXOutput(ws *websocket.Conn, r io.Reader) {
+func streamHTMXOutput(ws *websocket.Conn, r io.Reader, wg *sync.WaitGroup) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		text := scanner.Text()
@@ -138,5 +169,9 @@ func streamHTMXOutput(ws *websocket.Conn, r io.Reader) {
 			text,
 		)
 		_, _ = ws.Write([]byte(result))
+	}
+
+	if wg != nil {
+		wg.Done()
 	}
 }
