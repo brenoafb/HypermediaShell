@@ -2,195 +2,141 @@ package main
 
 import (
 	_ "embed"
+
+	"bufio"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
-	"net/url"
-	"os"
 	"os/exec"
 	"strings"
-	"sync"
 
-	"github.com/gookit/goutil/dump"
+	"golang.org/x/net/websocket"
 )
 
 //go:embed index.html
 var index []byte
 
-// TODO actually use sessions
-type Session struct {
-	ID      uint32
-	History []string
-}
-
 func main() {
-
-	openFile := ""
-	openFileMutex := sync.Mutex{}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write(index)
 	})
-	http.HandleFunc("/edit", func(w http.ResponseWriter, r *http.Request) {
-		openFileMutex.Lock()
-		defer openFileMutex.Unlock()
+	http.Handle("/ws", websocket.Handler(WSServer))
 
-		if openFile == "" {
-			fmt.Fprintf(w, "No file open")
-			return
-		}
-
-		body, err := ioutil.ReadAll(r.Body)
-		defer r.Body.Close()
-		if err != nil {
-			http.Error(w, "Error reading request body", http.StatusInternalServerError)
-			return
-		}
-
-		// body will have the format
-		// editor=<contents>
-		// where contents is the url encoding of the file contents
-		values, err := url.ParseQuery(string(body))
-		if err != nil {
-			http.Error(w, "Error parsing request body", http.StatusInternalServerError)
-			return
-		}
-
-		dump.P(values)
-
-		contents, ok := values["editor"]
-		if !ok {
-			http.Error(w, "Error: no editor field", http.StatusInternalServerError)
-			return
-		}
-
-		if len(contents) != 1 {
-			http.Error(w, "Error: too many editor fields", http.StatusInternalServerError)
-			return
-		}
-
-		fmt.Printf("Contents: %s\n", contents[0])
-
-		// write the contents to the file
-		err = ioutil.WriteFile(openFile, []byte(contents[0]), 0644)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error writing file: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// return ok
-		fmt.Fprintf(w, "Done editing file %s", openFile)
-	})
-
-	http.HandleFunc("/shell", func(w http.ResponseWriter, r *http.Request) {
-		body, err := ioutil.ReadAll(r.Body)
-		defer r.Body.Close()
-		if err != nil {
-			http.Error(w, "Error reading request body", http.StatusInternalServerError)
-			return
-		}
-
-		// pretty print the body
-		dump.P("body", string(body))
-
-		values, err := url.ParseQuery(string(body))
-		if err != nil {
-			http.Error(w, "Error parsing request body", http.StatusInternalServerError)
-			return
-		}
-		command := values.Get("command")
-		fmt.Fprintf(w, "> <b>%s</b><br>", command)
-		parts := strings.Split(command, " ")
-		if len(parts) == 0 {
-			fmt.Fprintf(w, "Error: no command")
-			return
-		}
-
-		if parts[0] == "edit" {
-			if len(parts) < 2 {
-				fmt.Fprintf(w, "Error: no filename")
-				return
-			}
-			filename := parts[1]
-			fmt.Fprintf(w, "Editing %s<br>", filename)
-			openFileMutex.Lock()
-			defer openFileMutex.Unlock()
-
-			openFile = filename
-
-			// check if the file exists.
-			// if so, get the contents.
-			// otherwise, initialize the contents to ""
-
-			contents := ""
-
-			fileinfo, err := os.Stat(filename)
-			if err == nil {
-				if fileinfo.IsDir() {
-					fmt.Fprintf(w, "Error: %s is a directory", filename)
-					return
-				}
-
-				if fileinfo.Size() > 0 {
-					// read the file
-					var err error
-					bytes, err := ioutil.ReadFile(filename)
-					if err != nil {
-						fmt.Fprintf(w, "Error: %v", err)
-						return
-					}
-					contents = string(bytes)
-				}
-			}
-
-			// send the response with the contents
-			response := fmt.Sprintf(`
-			<form>
-		  <div hx-target="this" hx-swap="outerHTML">
-				<textarea name="editor" rows="5" cols="50">%s</textarea>
-				<button type="submit" hx-post="/edit">Save</button>
-				<button type="submit" hx-post="/edit">Close</button>
-  		</div>	
-			</form>
-			`, contents)
-			fmt.Fprintf(w, "%s", response)
-
-			return
-		}
-
-		log.Printf("Running command: %s", parts)
-
-		cmd := exec.Command(parts[0], parts[1:]...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			log.Printf("Error: %v, out: %s", err, out)
-			outputString := formatError(out)
-			fmt.Fprintf(w, "%s", outputString)
-		} else {
-			outputString := formatOutput(out)
-			fmt.Fprintf(w, "%s", outputString)
-		}
-	})
-	port := 8080
+	port := 8081
 	fmt.Printf("Starting server at port %d\n", port)
 	addr := fmt.Sprintf(":%d", port)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
-func formatOutput(out []byte) string {
-	return fmt.Sprintf(
-		"<div class=\"output\">%s</div>",
-		strings.Replace(string(out), "\n", "<br>", -1),
-	)
+func WSServer(ws *websocket.Conn) {
+	fmt.Printf("New connection\n")
+
+	for {
+		data := make(map[string]interface{})
+		err := websocket.JSON.Receive(ws, &data)
+		if err != nil {
+			fmt.Printf("Error: %v.\n", err)
+			break
+		}
+
+		fmt.Printf("Received: %v\n", data)
+
+		commandLine := data["command"].(string)
+
+		parts := strings.Split(commandLine, " ")
+		if len(parts) == 0 {
+			fmt.Fprintf(ws, "Error: no command")
+			return
+		}
+
+		if err != nil {
+			fmt.Printf("Error: %v.\n", err)
+			break
+		}
+
+		fmt.Printf("Received: %v\n", commandLine)
+
+		execCommand(ws, commandLine)
+	}
 }
 
-func formatError(out []byte) string {
-	return fmt.Sprintf(
-		"<div class=\"error\">%s</div>",
-		strings.Replace(string(out), "\n", "<br>", -1),
+func execCommand(ws *websocket.Conn, command string) {
+	if strings.HasPrefix(command, "clear") {
+		clear(ws)
+		return
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", command)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr))
+		return
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr))
+		return
+	}
+
+	header := fmt.Sprintf(`
+		<div id="notifications" hx-swap-oob="beforeend">
+		<hr>
+		<b> > %s</b>
+		<br></div>
+		`,
+		command,
 	)
+	_, _ = ws.Write([]byte(header))
+
+	err = cmd.Start()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr))
+		return
+	}
+
+	go streamHTMXOutput(ws, stdout)
+	go streamHTMXOutput(ws, stderr)
+
+	err = cmd.Wait()
+	if err != nil {
+		errStr := fmt.Sprintf("%s", err.Error())
+		streamHTMXOutput(ws, strings.NewReader(errStr))
+		return
+	}
+
+	footer := fmt.Sprintf(`
+		<div id="notifications" hx-swap-oob="beforeend">
+		<hr>
+		</div>
+		`,
+	)
+	_, _ = ws.Write([]byte(footer))
 }
 
-// func disp(filename string) string {
-// }
+func clear(ws *websocket.Conn) {
+	result := fmt.Sprintf(
+		"<div id=\"notifications\" hx-swap-oob=\"outerHTML\"></div>",
+	)
+	_, _ = ws.Write([]byte(result))
+}
+
+func streamHTMXOutput(ws *websocket.Conn, r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		text := scanner.Text()
+		result := fmt.Sprintf(`
+			<div id="notifications" hx-swap-oob="beforeend">
+			%s
+			<br></div>
+			`,
+			text,
+		)
+		_, _ = ws.Write([]byte(result))
+	}
+}
