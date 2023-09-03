@@ -40,8 +40,7 @@ func WSServer(ws *websocket.Conn) {
 		data := make(map[string]interface{})
 		err := websocket.JSON.Receive(ws, &data)
 		if err != nil {
-			errStr := fmt.Sprintf("%s", err.Error())
-			streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+			streamHTMXOutput(ws, strings.NewReader(err.Error()), nil)
 			continue
 		}
 
@@ -50,8 +49,7 @@ func WSServer(ws *websocket.Conn) {
 		commandLine := data["command"].(string)
 
 		if err != nil {
-			errStr := fmt.Sprintf("%s", err.Error())
-			streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+			streamHTMXOutput(ws, strings.NewReader(err.Error()), nil)
 			continue
 		}
 
@@ -81,7 +79,7 @@ func execCommand(ws *websocket.Conn, command string) {
 	header := fmt.Sprintf(`
 		<div id="notifications" hx-swap-oob="beforeend">
 		<hr>
-		<b> > %s</b>
+		<b>%s</b>
 		<br></div>
 		`,
 		command,
@@ -89,12 +87,11 @@ func execCommand(ws *websocket.Conn, command string) {
 	_, _ = ws.Write([]byte(header))
 
 	defer func() {
-		footer := fmt.Sprintf(`
+		footer := `
 		<div id="notifications" hx-swap-oob="beforeend">
 		<hr>
 		</div>
-		`,
-		)
+		`
 
 		_, _ = ws.Write([]byte(footer))
 	}()
@@ -107,8 +104,7 @@ func execCommand(ws *websocket.Conn, command string) {
 		}
 		err := cd(target)
 		if err != nil {
-			errStr := fmt.Sprintf("%s", err.Error())
-			streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+			streamHTMXOutput(ws, strings.NewReader(err.Error()), nil)
 		}
 		return
 	}
@@ -117,21 +113,18 @@ func execCommand(ws *websocket.Conn, command string) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		streamHTMXOutput(ws, strings.NewReader(err.Error()), nil)
 		return
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		streamHTMXOutput(ws, strings.NewReader(err.Error()), nil)
 		return
 	}
 
 	err = cmd.Start()
 	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		streamHTMXOutput(ws, strings.NewReader(err.Error()), nil)
 		return
 	}
 
@@ -143,17 +136,15 @@ func execCommand(ws *websocket.Conn, command string) {
 
 	err = cmd.Wait()
 	if err != nil {
-		errStr := fmt.Sprintf("%s", err.Error())
-		streamHTMXOutput(ws, strings.NewReader(errStr), nil)
+		streamHTMXOutput(ws, strings.NewReader(err.Error()), nil)
 		return
 	}
 	wg.Wait()
 }
 
 func clear(ws *websocket.Conn) {
-	result := fmt.Sprintf(
-		"<div id=\"notifications\" hx-swap-oob=\"outerHTML\"></div>",
-	)
+	result :=
+		"<div id=\"notifications\" hx-swap-oob=\"outerHTML\"></div>"
 	_, _ = ws.Write([]byte(result))
 }
 
